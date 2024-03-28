@@ -1,6 +1,6 @@
 [package]
 name = "lambda-s3-restructure"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 homepage = "https://github.com/buoyant-data/lambda-s3-restructure"
 authors = [
