@@ -2,6 +2,7 @@ use aws_lambda_events::event::s3::{S3Entity, S3Event};
 use aws_lambda_events::sqs::SqsEvent;
 use aws_sdk_s3::Client as S3Client;
 use lambda_runtime::{run, service_fn, Error, LambdaEvent};
+use regex::Regex;
 use routefinder::Router;
 use tracing::log::*;
 
@@ -61,6 +62,8 @@ async fn function_handler(
 ) -> Result<(), Error> {
     let input_pattern =
         std::env::var("INPUT_PATTERN").expect("You must define INPUT_PATTERN in the environment");
+    let exclude_regex: Option<Regex> = std::env::var("EXCLUDE_REGEX")
+                            .map(|ex| Regex::new(ex.as_ref()).expect("Failed to compile EXCLUDE_REGEX")).ok();
     let output_template = std::env::var("OUTPUT_TEMPLATE")
         .expect("You must define OUTPUT_TEMPLATE in the environment");
 
@@ -80,6 +83,10 @@ async fn function_handler(
         debug!("Processing {entity:?}");
 
         if let Some(source_key) = entity.object.key {
+            if should_exclude(exclude_regex.as_ref(), &source_key) {
+                continue;
+            }
+
             let parameters = add_builtin_parameters(captured_parameters(&router, &source_key)?);
             let output_key = template.render(&parameters)?;
             info!("Copying {source_key:?} to {output_key:?}");
@@ -110,7 +117,7 @@ async fn main() -> Result<(), Error> {
         .without_time()
         .init();
 
-    let shared_config = aws_config::load_from_env().await;
+    let shared_config = aws_config::from_env().load().await;
     let client = S3Client::new(&shared_config);
     let client_ref = &client;
 
@@ -146,6 +153,15 @@ fn captured_parameters<Handler>(
     Ok(data)
 }
 
+/// Return true if the given key matches the pattern and should be excluded from consideration
+fn should_exclude(pattern: Option<&Regex>, key: &str) -> bool {
+    match pattern {
+        Some(re) => re.is_match(key),
+        None => false,
+    }
+}
+
+/// Introduce the necessary built-in parameters to the `data` for rendering a Handlebars template
 fn add_builtin_parameters(mut data: HashMap<String, String>) -> HashMap<String, String> {
     use chrono::Datelike;
     let now = chrono::Utc::now();
@@ -246,7 +262,7 @@ mod tests {
   ]
 }"#;
 
-        let event: S3Event = serde_json::from_str(&raw_buf)?;
+        let event: S3Event = serde_json::from_str(raw_buf)?;
         Ok(event)
     }
 
@@ -272,4 +288,19 @@ mod tests {
             "databases/oltp/a_table/ds=2023-09-05/some.parquet"
         );
     }
+
+    #[test]
+    fn test_exclude_regex() {
+        let exclude = Some(Regex::new(r#"^path\/to\/table.*"#).expect("Failed to compile regular expression"));
+        let keys = vec![
+            "path/to/alpha",
+            "path/to/bravo/foo.parquet",
+            "path/to/table",
+            "path/to/table/foo.parquet",
+        ];
+
+        let filtered: Vec<_> = keys.iter().filter(|k| !should_exclude(exclude.as_ref(), k)).map(|k| k.clone()).collect();
+        assert_ne!(filtered, keys);
+    }
 }
+

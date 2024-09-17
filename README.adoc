@@ -66,6 +66,10 @@ The following environment variables must be set for the function to run properly
 | _required byt empty by default_
 | A link:https://crates.io/crates/liquid[liquid] template which produces a compatible path for outputting the file into the S3 bucket.
 
+| `EXCLUDE_REGEX`
+| 
+| optional regular expression for keys to exclude from consideration
+
 |===
 
 [WARNING]
