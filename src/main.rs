@@ -63,7 +63,8 @@ async fn function_handler(
     let input_pattern =
         std::env::var("INPUT_PATTERN").expect("You must define INPUT_PATTERN in the environment");
     let exclude_regex: Option<Regex> = std::env::var("EXCLUDE_REGEX")
-                            .map(|ex| Regex::new(ex.as_ref()).expect("Failed to compile EXCLUDE_REGEX")).ok();
+        .map(|ex| Regex::new(ex.as_ref()).expect("Failed to compile EXCLUDE_REGEX"))
+        .ok();
     let output_template = std::env::var("OUTPUT_TEMPLATE")
         .expect("You must define OUTPUT_TEMPLATE in the environment");
 
@@ -91,10 +92,11 @@ async fn function_handler(
             let output_key = template.render(&parameters)?;
             info!("Copying {source_key:?} to {output_key:?}");
             if let Some(bucket) = entity.bucket.name {
-                debug!("Sending a copy request for {bucket} with {source_key} to {output_key}");
+                let output_bucket = std::env::var("OUTPUT_BUCKET").unwrap_or(bucket.clone());
+                debug!("Sending a copy request for {output_bucket} with {bucket}/{source_key} to {output_key}");
                 let result = client
                     .copy_object()
-                    .bucket(&bucket)
+                    .bucket(&output_bucket)
                     .copy_source(format!("{bucket}/{source_key}"))
                     .key(output_key)
                     .send()
@@ -291,7 +293,9 @@ mod tests {
 
     #[test]
     fn test_exclude_regex() {
-        let exclude = Some(Regex::new(r#"^path\/to\/table.*"#).expect("Failed to compile regular expression"));
+        let exclude = Some(
+            Regex::new(r#"^path\/to\/table.*"#).expect("Failed to compile regular expression"),
+        );
         let keys = vec![
             "path/to/alpha",
             "path/to/bravo/foo.parquet",
@@ -299,8 +303,11 @@ mod tests {
             "path/to/table/foo.parquet",
         ];
 
-        let filtered: Vec<_> = keys.iter().filter(|k| !should_exclude(exclude.as_ref(), k)).map(|k| k.clone()).collect();
+        let filtered: Vec<_> = keys
+            .iter()
+            .filter(|k| !should_exclude(exclude.as_ref(), k))
+            .map(|k| k.clone())
+            .collect();
         assert_ne!(filtered, keys);
     }
 }
-
