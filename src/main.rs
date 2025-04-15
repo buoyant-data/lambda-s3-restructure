@@ -88,7 +88,14 @@ async fn function_handler(
                 continue;
             }
 
-            let parameters = add_builtin_parameters(captured_parameters(&router, &source_key)?);
+            let parameters = match captured_parameters(&router, &source_key) {
+                Some(params) => add_builtin_parameters(params),
+                None => {
+                    info!("Triggered with {source_key} which does not match the input pattern, ignoring");
+                    continue;
+                }
+            };
+
             let output_key = template.render(&parameters)?;
             info!("Copying {source_key:?} to {output_key:?}");
             if let Some(bucket) = entity.bucket.name {
@@ -146,13 +153,18 @@ fn entities_from(event: S3Event) -> Result<Vec<S3Entity>, anyhow::Error> {
 fn captured_parameters<Handler>(
     router: &Router<Handler>,
     source_key: &str,
-) -> Result<HashMap<String, String>, anyhow::Error> {
+) -> Option<HashMap<String, String>> {
     let matches = router.matches(source_key);
+
+    if matches.is_empty() {
+        return None;
+    }
+
     let mut data: HashMap<String, String> = HashMap::new();
     for capture in matches[0].captures().into_iter() {
         data.insert(capture.name().into(), capture.value().into());
     }
-    Ok(data)
+    Some(data)
 }
 
 /// Return true if the given key matches the pattern and should be excluded from consideration
@@ -309,5 +321,25 @@ mod tests {
             .map(|k| k.clone())
             .collect();
         assert_ne!(filtered, keys);
+    }
+
+    #[test]
+    fn test_captured_parameters() {
+        let mut router = Router::new();
+        router.add("/:ignore/livemode/:table/:filename", 1);
+        let parameters = captured_parameters(&router, "2025041518/testmode/sometable/part-00000-6dc656c3-fd08-4377-a846-a36f58f5937b-c000.zstd.parquet");
+        assert_eq!(parameters, None);
+
+        let parameters = captured_parameters(&router, "2025041518/livemode/sometable/part-00000-6dc656c3-fd08-4377-a846-a36f58f5937b-c000.zstd.parquet");
+
+        let mut expected: HashMap<String, String> = HashMap::default();
+        expected.insert("ignore".into(), "2025041518".into());
+        expected.insert("table".into(), "sometable".into());
+        expected.insert(
+            "filename".into(),
+            "part-00000-6dc656c3-fd08-4377-a846-a36f58f5937b-c000.zstd.parquet".into(),
+        );
+
+        assert_eq!(Some(expected), parameters);
     }
 }
